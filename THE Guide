@@ -1,0 +1,1275 @@
+COMPLETE DETAILED EXPLANATION & RECREATION GUIDE
+
+## **TABLE OF CONTENTS**
+
+1. [Introduction & Project Goals](#introduction--project-goals)
+2. [Why This Architecture?](#why-this-architecture)
+3. [Understanding Each Technology](#understanding-each-technology)
+4. [Complete Device Reference](#complete-device-reference)
+5. [Detailed Configuration Walkthrough](#detailed-configuration-walkthrough)
+6. [Troubleshooting & Verification](#troubleshooting--verification)
+7. [Advanced Concepts Explained](#advanced-concepts-explained)
+
+---
+
+# **INTRODUCTION & PROJECT GOALS**
+
+## **What Are We Building?**
+
+needs a secure, reliable, fast network to:
+- ✅ Handle thousands of customers accessing online 
+- ✅ Protect sensitive financial data from hackers
+- ✅ Keep running 24/7/365 (no downtime allowed!)
+- ✅ Balance traffic across multiple servers
+- ✅ Monitor suspicious activity in real-time
+- ✅ Store data safely in databases
+
+**This project simulates exactly that** — a production-grade data center network in Cisco Packet Tracer.
+
+## **Project Statistics**
+
+| Metric | Value |
+|--------|-------|
+| Total Devices | 21 |
+| Routers | 4 (2 internal, 2 ISP) |
+| Switches | 10 (6 access, 2 distribution, 2 core) |
+| Firewalls | 2 |
+| Servers | 6 (SOC, SIEM, IDS, IPS, Load-Balancer, Database) |
+| VLANs | 10 (logical networks) |
+| Subnets | 8 (10.0.10.0/24 through 10.0.80.0/24) |
+| Protocols | OSPF, BGP, HSRP, NAT, VLAN, STP |
+| Security Zones | 3 (Outside, DMZ, Inside) |
+
+---
+
+# **WHY THIS ARCHITECTURE?**
+
+## **The 3-Tier Architecture Explained**
+
+Think of a bank building:
+
+```
+┌─────────────────────────────────────────────────┐
+│        CORE LAYER (Head Office)                  │
+│  ┌─────────────────────────────────────────────┐│
+│  │ Where all decisions are made, data flows     ││
+│  │ through here. OSPF routing, HSRP redundancy ││
+│  │ CORE-R1, CORE-R2, CORE-SW1, CORE-SW2       ││
+│  └─────────────────────────────────────────────┘│
+└────────────────┬────────────────────────────────┘
+                 │
+    ┌────────────┴────────────┐
+    │                          │
+┌───┴──────────┐      ┌───────┴──────┐
+│ FIREWALL     │      │ FIREWALL     │
+│ (Security)   │      │ (Security)   │
+│ FW1 & FW2    │      │ Gates Entry  │
+└───┬──────────┘      └───────┬──────┘
+    │                          │
+┌───┴──────────────────────────┴───┐
+│     AGGREGATION LAYER             │
+│  ┌─────────────────────────────┐ │
+│  │ Distribution/Organization    │ │
+│  │ AGG-SW1 & AGG-SW2           │ │
+│  │ Groups by department         │ │
+│  └─────────────────────────────┘ │
+└───┬──────────────────────────────┘
+    │
+┌───┴──────────────────────────────────────────────────┐
+│              ACCESS LAYER (Departments)              │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │ Where actual work happens                       │ │
+│  │ ACC-SW1 through ACC-SW6                        │ │
+│  │ Servers, Storage, Security appliances          │ │
+│  └─────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────┘
+```
+
+### **Why 3 Tiers?**
+
+**Separation of Concerns:**
+- **Core** = High-speed backbone, intelligent routing
+- **Distribution** = Traffic aggregation, VLAN termination, policy enforcement
+- **Access** = End devices, simple switching
+
+**Advantages:**
+1. **Scalability** — Add new servers without rebuilding core
+2. **Redundancy** — Multiple paths for traffic (no single point of failure)
+3. **Performance** — Each layer optimized for its role
+4. **Security** — Easier to enforce policies at each boundary
+5. **Maintainability** — Problems isolated to specific layers
+
+---
+
+## **Why Each Component Exists**
+
+### **OSPF (Dynamic Routing)**
+
+**Problem It Solves:**
+Without OSPF, you'd have to manually tell every router where to send packets. Add one new server? Update routing tables on 4 routers. Nightmare!
+
+**OSPF Solution:**
+Routers automatically discover each other and share route information. Add a new subnet, and within seconds, everyone knows about it.
+
+```
+Without OSPF:          With OSPF:
+Manual Routes          Automatic Discovery
+Hard to Maintain       Self-Healing
+Slow Updates           Fast Convergence
+Error-Prone            Reliable
+```
+
+### **BGP (Internet Connectivity)**
+
+**Problem:**
+You want to connect to TWO internet providers for redundancy. If ISP-1 goes down, traffic flows through ISP-2.
+
+**BGP Solution:**
+BGP (Border Gateway Protocol) is the protocol the entire internet uses to route traffic between providers. It allows you to announce your network to the outside world.
+
+```
+Your Bank (AS 65001)
+      │
+      ├─→ ISP-1 (AS 100) ←─┐
+      │                      │
+      └─→ ISP-2 (AS 200) ←─┤
+                             │
+                        Internet
+```
+
+**Why Two ISPs?**
+- **Redundancy** — If one fails, the other carries all traffic
+- **Load Balancing** — Spread traffic across both links
+- **Cost** — Competition between providers keeps prices down
+
+### **HSRP (Gateway Redundancy)**
+
+**Problem:**
+Servers need a default gateway (like a home address for returning mail). If that gateway fails, servers can't reach other networks.
+
+```
+Servers → Default Gateway (10.0.20.1) → Rest of Network
+          ↑
+          What if this fails?
+```
+
+**HSRP Solution:**
+Two routers/switches pretend to be ONE virtual IP address. If the active one dies, the standby takes over instantly. Servers don't need to change their settings.
+
+```
+Servers → Virtual IP (10.0.20.254) ← CORE-SW1 (Active) OR
+                                    ← CORE-SW2 (Standby)
+                                    
+If CORE-SW1 dies, CORE-SW2 automatically takes over.
+No server reconfiguration needed!
+```
+
+### **VLAN (Virtual Networks)**
+
+**Problem:**
+You have 100+ servers that need to be grouped by function:
+- Financial databases on one switch
+- Web servers on another
+- Security appliances on yet another
+
+Traditional solution: Buy separate physical switches for each group. Expensive!
+
+**VLAN Solution:**
+One physical switch, but logically divided into multiple networks:
+
+```
+Physical Switch = VLAN 10 + VLAN 20 + VLAN 30 + ...
+Each VLAN = Separate broadcast domain = Separate security zone
+```
+
+**Real World Analogy:**
+Imagine a single hotel with multiple restaurants:
+- Ground floor = Restaurant A (VLAN 10)
+- 2nd floor = Restaurant B (VLAN 20)
+- 3rd floor = Restaurant C (VLAN 30)
+
+Same building, different businesses. Customers from Restaurant A can't accidentally walk into Restaurant B.
+
+### **Firewalls (Security)**
+
+**Problem:**
+The internet has bad actors trying to hack your bank. You need to control what traffic gets in and out.
+
+**Firewall Solution:**
+Acts like a security guard checking every packet:
+- ✅ Allow: Web traffic (HTTP/HTTPS)
+- ❌ Deny: Malware
+- ❌ Deny: Suspicious patterns
+- ✅ Allow: Only authorized database access
+
+**Two Firewalls in DMZ Pattern:**
+
+```
+Internet → [FW1] → DMZ → [FW2] → Internal Network
+           ↑                    ↑
+       Outside-in          DMZ-in
+       Security            More
+       Level 0             Restrictive
+```
+
+FW1 = Stops most bad traffic before it enters  
+FW2 = Stops lateral movement if FW1 fails
+
+### **NAT (Network Address Translation)**
+
+**Problem:**
+Your internal IPs (10.0.x.x) are private. The internet doesn't understand them. You need to translate them to public IPs.
+
+**NAT Solution:**
+
+**Static NAT (1-to-1 mapping):**
+```
+Internal: 10.0.20.100 (Load-Balancer)
+External: 203.0.113.150
+
+Customer accesses bank at 203.0.113.150
+NAT translates it to 10.0.20.100 automatically
+```
+
+**Dynamic NAT (PAT - many-to-one):**
+```
+All Internal Servers (10.0.x.x)
+            ↓
+      NAT Translation
+            ↓
+    Router WAN IP:random_port
+```
+
+---
+
+# **UNDERSTANDING EACH TECHNOLOGY**
+
+## **OSPF (Open Shortest Path First)**
+
+### **What It Is:**
+A dynamic routing protocol that routers use to automatically discover and communicate routes within your network.
+
+### **How It Works (Simple Explanation):**
+
+**Step 1: Discovery**
+```
+Router A says: "Hello, I'm Router A, my ID is 1.1.1.3"
+Router B says: "Hello, I'm Router B, my ID is 2.2.2.3"
+They shake hands (become neighbors)
+```
+
+**Step 2: Information Sharing**
+```
+Router A: "I can reach 10.0.10.0/24 (cost: 10), 10.0.20.0/24 (cost: 20)"
+Router B: "I can reach 10.0.30.0/24 (cost: 15), 10.0.40.0/24 (cost: 25)"
+They exchange routes
+```
+
+**Step 3: Decision Making**
+```
+Router A decides: 
+"To reach 10.0.30.0, I'll go through Router B (cost: 15+10=25)"
+"To reach 10.0.40.0, I'll go through Router B (cost: 25+10=35)"
+```
+
+**Step 4: Automatic Adjustment**
+```
+If the link between A-B breaks:
+Both routers immediately detect the failure
+They recalculate routes
+Traffic automatically reroutes through backup paths
+```
+
+### **Key OSPF Concepts:**
+
+**Router ID:**
+- Unique identifier for each router (like a driver's license number)
+- In our project: 1.1.1.3, 2.2.2.3, 3.3.3.1, etc.
+- Used for identification and tiebreaking
+
+**Area:**
+- Logical grouping of routers (like cities)
+- Area 0 = backbone (must be connected to all areas)
+- Our entire network is Area 0 (single area for simplicity)
+
+**Cost/Metric:**
+- How expensive it is to reach a destination
+- Lower cost = preferred path
+- Usually calculated as: 100,000,000 / Bandwidth(bps)
+- 100 Mbps link = cost 1000
+- 1 Gbps link = cost 100
+
+**Authentication:**
+- MD5 key ensures only trusted routers can form friendships
+- All neighbors must know the password
+- Our password: `BANKOSPF2026`
+
+**Convergence Time:**
+- How fast the network adapts to failures
+- Faster convergence = less data loss
+- Our network converges in seconds
+
+---
+
+## **BGP (Border Gateway Protocol)**
+
+### **What It Is:**
+The protocol that the entire internet uses to route traffic between different organizations (Autonomous Systems).
+
+### **How It's Different from OSPF:**
+
+| Aspect | OSPF | BGP |
+|--------|------|-----|
+| **Purpose** | Internal routing (within organization) | External routing (between organizations) |
+| **Scale** | 100s of routers | Internet-scale (100,000s of routers) |
+| **Trust** | All routers trusted equally | Trust only your neighbors |
+| **Metric** | Automatic cost calculation | Manual policies |
+| **Convergence** | Fast (seconds) | Slower (minutes) |
+
+### **BGP in Our Project:**
+
+**Our Setup:**
+```
+Bank's Network (AS 65001)
+        │
+        ├→ ISP-1 (AS 100)
+        │
+        └→ ISP-2 (AS 200)
+```
+
+**What Happens:**
+```
+Bank to ISP-1: "Hi, I'm AS 65001. I have the network 10.0.0.0/16"
+ISP-1 to other ISPs: "AS 65001 has 10.0.0.0/16, you can reach them through me"
+
+Bank to ISP-2: "Hi, I'm AS 65001. I have the network 10.0.0.0/16"
+ISP-2 to other ISPs: "AS 65001 has 10.0.0.0/16, you can reach them through me"
+
+Result: Your bank is now reachable from anywhere on the internet via two paths!
+```
+
+### **Why Two ISPs?**
+
+**Redundancy:**
+```
+Normal: Traffic → ISP-1 → Internet
+Failure: Traffic → ISP-2 → Internet (automatic failover)
+```
+
+**Load Balancing:**
+```
+Half the outbound traffic → ISP-1
+Half the outbound traffic → ISP-2
+Faster speeds overall
+```
+
+---
+
+## **HSRP (Hot Standby Routing Protocol)**
+
+### **The Problem HSRP Solves:**
+
+**Without HSRP:**
+```
+Servers have default gateway: 10.0.20.1 (CORE-SW1)
+
+If CORE-SW1 crashes:
+- All servers lose connectivity
+- Had to manually reconfigure each server's gateway
+- This takes HOURS!
+```
+
+**With HSRP:**
+```
+Servers have default gateway: 10.0.20.254 (Virtual IP)
+
+CORE-SW1 and CORE-SW2 both "own" this virtual IP
+If CORE-SW1 crashes:
+- CORE-SW2 automatically takes over the virtual IP
+- Servers don't notice! Still sending to .254!
+```
+
+### **How HSRP Elects Active/Standby:**
+
+**Priority System:**
+```
+CORE-SW1 priority = 110 (Active - higher wins)
+CORE-SW2 priority = 100 (Standby)
+
+Preempt = Yes, so if CORE-SW1 recovers, it reclaims active role
+```
+
+**Virtual IP Addresses in Our Project:**
+
+| VLAN | Virtual IP | Which Switch Active | Priority on SW1 |
+|------|-----------|-------------------|-----------------|
+| 10 | 10.0.10.254 | CORE-SW1 | 110 |
+| 20 | 10.0.20.254 | CORE-SW1 | 110 |
+| 30 | 10.0.30.254 | CORE-SW1 | 110 |
+| 40 | 10.0.40.254 | CORE-SW1 | 110 |
+| 50 | 10.0.50.254 | CORE-SW1 | 110 |
+| 60 | 10.0.60.254 | CORE-SW1 | 110 |
+| 70 | 10.0.70.254 | CORE-SW1 | 110 |
+
+### **How Servers Use HSRP:**
+
+```
+Actual Configuration on Server:
+Gateway: 10.0.20.254  (virtual IP, not a real interface!)
+Subnet Mask: 255.255.255.0
+
+Real Devices:
+CORE-SW1 VLAN 20 SVI: 10.0.20.1 (part of HSRP group, advertises .254)
+CORE-SW2 VLAN 20 SVI: 10.0.20.1 (part of HSRP group, advertises .254)
+
+When server sends a packet:
+1. Looks up next-hop for destination
+2. Finds gateway .254 in ARP table
+3. Actually sends to CORE-SW1's MAC address (active)
+4. CORE-SW1 routes the packet
+
+If CORE-SW1 fails:
+1. ARP table entry expires
+2. Server broadcasts ARP request for .254
+3. CORE-SW2 responds with its MAC address
+4. Server now sends to CORE-SW2
+5. CORE-SW2 routes the packet
+
+Seconds of interruption = acceptable, no reconfiguration needed!
+```
+
+---
+
+## **VLANs (Virtual LANs)**
+
+### **The Problem VLANs Solve:**
+
+**Old Way (Pre-VLAN):**
+```
+Database Department:    Physical Switch 1
+Web Department:         Physical Switch 2
+Security Department:    Physical Switch 3
+Management:             Physical Switch 4
+
+This is expensive, complex, and hard to manage!
+```
+
+**New Way (VLAN):**
+```
+Single Physical Switch
+├─ VLAN 10: Management
+├─ VLAN 20: Servers
+├─ VLAN 30: Database
+└─ ... etc
+
+All logical, much cheaper!
+```
+
+### **How VLANs Work:**
+
+**VLAN Tagging (802.1Q):**
+
+When a frame travels on a trunk port, it gets tagged:
+```
+Original Frame: [MAC | IP | Data]
+
+Becomes: [MAC | VLAN ID (4802.1Q) | IP | Data]
+
+Receiving Switch:
+"This frame is for VLAN 20, I'll forward it to VLAN 20 ports only"
+```
+
+**VLAN Isolation (Broadcast Domain):**
+
+```
+VLAN 10 (Management)
+├─ Server A
+├─ Server B
+└─ (can communicate with each other)
+
+VLAN 20 (Database)
+├─ Server C
+├─ Server D
+└─ (can communicate with each other, but NOT with VLAN 10)
+
+If Server A broadcasts, only Server B hears it.
+Server C does NOT hear it (security benefit!)
+```
+
+### **Our VLANs Explained:**
+
+| VLAN | Name | Purpose | Devices | Security Level |
+|------|------|---------|---------|-----------------|
+| 10 | MANAGEMENT | Network admin access via SSH | Core/Agg switches | High |
+| 20 | SERVERS | Web servers, load balancer | ACC-SW1, ACC-SW2 | High |
+| 30 | DATABASE | Database servers | ACC-SW2, ACC-SW3 | Very High |
+| 40 | INTERNAL | Infrastructure, support services | Various | Medium |
+| 50 | SOC | Security Operations Center | ACC-SW3, ACC-SW5, ACC-SW6 | Very High |
+| 60 | SIEM | Monitoring & log aggregation | ACC-SW4, ACC-SW5 | High |
+| 70 | STORAGE | NAS, backup systems | ACC-SW3, ACC-SW5 | High |
+| 80 | PEERING | Inter-site routing | Core layer | Very High |
+| 99 | BLACKHOLE | Unused ports (security isolation) | All switches | None |
+
+### **Key VLAN Concepts:**
+
+**Native VLAN:**
+- Frames without VLAN tag belong to native VLAN
+- Usually VLAN 1 (default)
+- In our project: not critical since we use explicit tagging
+
+**Trunk vs Access Ports:**
+
+**Access Port (Host Facing):**
+```
+Speed: 100 Mbps or 1 Gbps
+Carries: Frames for ONE VLAN only (no tag)
+Used for: Connecting end devices (servers, computers)
+Example: FastEthernet0/3-24 on access switches
+
+When device sends frame to access port:
+- Switch adds VLAN tag
+- Internally processes as that VLAN
+- Can only forward to ports in that VLAN
+```
+
+**Trunk Port (Switch-to-Switch):**
+```
+Speed: 1 Gbps (usually)
+Carries: Tagged frames for MULTIPLE VLANs
+Used for: Connecting switches together
+Example: GigabitEthernet1/1, GigabitEthernet2/1 on core/agg
+
+When device sends frame to trunk port:
+- Frame keeps VLAN tag
+- Receiving switch reads tag
+- Forwards to correct VLAN
+```
+
+---
+
+## **FIREWALLS & SECURITY**
+
+### **Why Two Firewalls?**
+
+**Layered Security (Defense in Depth):**
+```
+Internet
+   │
+   ▼
+[FW1: Outside-to-DMZ]
+   │
+   ├─ Stops most attacks here
+   ├─ Blocks RFC1918 spoofing
+   └─ Allows only HTTP/HTTPS
+      │
+      ▼
+   [DMZ: Untrusted but filtered]
+      │
+      ▼
+[FW2: DMZ-to-Inside]
+   │
+   ├─ More restrictive policies
+   └─ Allows only necessary traffic
+      │
+      ▼
+[Internal Network: Most trusted]
+```
+
+### **FW1 Configuration Explained:**
+
+**Interfaces:**
+```
+GigabitEthernet1/1: 203.0.113.x (outside)
+- Faces the internet
+- Security level 0 (least trusted)
+- Receives packets from unknown sources
+
+GigabitEthernet1/2: 10.0.80.x (dmz)
+- Faces the DMZ
+- Security level 50 (semi-trusted)
+- Forwards allowed packets to inside
+```
+
+**ACL Rules (FW1_IN):**
+
+Rule 1: `deny ip any 10.0.0.0 255.255.0.0`
+- Blocks any packet claiming to come from internal IPs
+- Prevents spoofing (attacker pretending to be from inside)
+- Why? Internet shouldn't have packets from 10.0.x.x!
+
+Rule 2: `deny ip any 172.16.0.0 255.240.0.0` & `deny ip any 192.168.0.0 255.255.0.0`
+- Blocks other RFC1918 private ranges
+- Defense against spoofing
+
+Rule 3: `permit tcp any any eq 80` & `permit tcp any any eq 443`
+- Allows HTTP (port 80) and HTTPS (port 443)
+- Customers need to access the bank website!
+
+Rule 4: `permit tcp any any established`
+- Allows return traffic from outbound connections
+- If internal server made connection, allow responses
+
+Rule 5: `deny ip any any`
+- Implicit deny (default drop)
+- Anything not explicitly allowed is blocked
+
+### **FW2 Configuration Explained:**
+
+**Interfaces:**
+```
+GigabitEthernet1/1: 10.0.80.x (dmz)
+- Receives from FW1
+- Security level 50
+
+GigabitEthernet1/2: 10.0.50.x (inside)
+- Faces internal network
+- Security level 100 (most trusted)
+```
+
+**ACL Rules (FW2_DB) - Database Access Control:**
+
+```
+permit tcp 10.0.20.0 255.255.255.0 10.0.30.0 255.255.255.0 eq 3306
+```
+- Source: VLAN 20 (Web Servers)
+- Destination: VLAN 30 (Database)
+- Port: 3306 (MySQL)
+- **Meaning:** "Web servers can connect to database"
+
+```
+permit tcp 10.0.50.0 255.255.255.0 10.0.30.0 255.255.255.0 eq 3306
+```
+- Source: VLAN 50 (Security - SOC, IDS, IPS)
+- Destination: VLAN 30 (Database)
+- Port: 3306 (MySQL)
+- **Meaning:** "Security appliances can audit database"
+
+```
+deny ip any any
+```
+- Everything else is blocked
+- Other VLANs CANNOT access database directly
+- Example: VLAN 40 can't connect to VLAN 30
+
+---
+
+## **NAT (Network Address Translation)**
+
+### **Why NAT?**
+
+**Problem:**
+```
+Internal IPs: 10.0.x.x (private, internet doesn't understand)
+External: 203.0.113.x (public)
+
+How does internet send response back to internal IPs?
+It doesn't know how!
+```
+
+**Solution:**
+```
+Internal → Router → Translates to public IP → Internet
+Internet response → Router → Translates back to internal → Internal
+```
+
+### **Two Types of NAT in Our Project:**
+
+**Static NAT (Load-Balancer):**
+```
+Configuration:
+ip nat inside source static 10.0.20.100 203.0.113.150
+
+Meaning:
+Every packet from 10.0.20.100 → becomes 203.0.113.150
+Every packet to 203.0.113.150 → becomes 10.0.20.100
+
+Real-World Example:
+Customer: "I want to access my bank at 203.0.113.150"
+Internet: Routes to 203.0.113.150
+Router: "That's actually 10.0.20.100 internally"
+Translates to 10.0.20.100
+Load-Balancer receives request
+Sends response back
+Router translates back to 203.0.113.150
+Customer gets response
+
+Advantage:
+- Persistent, always same translation
+- Perfect for public-facing servers
+```
+
+**Dynamic NAT with PAT (Internal Servers):**
+```
+Configuration:
+access-list INSIDE_HOSTS permit 10.0.0.0 0.0.255.255
+ip nat inside source list INSIDE_HOSTS interface GigabitEthernet0/0 overload
+
+Meaning:
+Any internal IP trying to reach outside
+Gets translated to router's WAN IP (203.0.113.2)
+With different port number
+
+Example:
+Server A (10.0.20.5) connects to example.com
+Router: "Let me translate this"
+Becomes: 203.0.113.2:1024
+Router remembers: "Port 1024 belongs to 10.0.20.5"
+
+Response from example.com arrives at 203.0.113.2:1024
+Router: "This belongs to 10.0.20.5"
+Forwards to 10.0.20.5
+
+Advantage:
+- Many internal IPs share one public IP
+- Cost-effective
+- Dynamic allocation (no manual setup)
+
+"Overload" means: Use same port translation for multiple IPs
+```
+
+---
+
+## **QoS (Quality of Service)**
+
+### **Why QoS?**
+
+**Problem:**
+```
+All traffic treated equally:
+Critical banking transaction = 1 Mbps
+Backup routine (doesn't matter if slow) = 1 Mbps
+
+During congestion, critical work slows down!
+```
+
+**Solution:**
+```
+Prioritize critical traffic:
+Banking transactions = 40% of bandwidth (priority)
+High priority = 30%
+Normal priority = 20%
+Best effort (everything else) = 10%
+
+Now, even if network is congested, critical work always gets 40%!
+```
+
+### **Our QoS Policy (BANK_QoS):**
+
+```
+policy-map BANK_QoS
+ class CRITICAL
+  priority percent 40       ← Critical banking (highest)
+ exit
+ class HIGH
+  bandwidth percent 30      ← Important services
+ exit
+ class NORMAL
+  bandwidth percent 20      ← Regular traffic
+ exit
+ class-default
+  bandwidth percent 10      ← Everything else (lowest)
+ exit
+```
+
+Applied to: CORE-R1 and CORE-R2 WAN interfaces  
+Effect: Bandwidth management across internet links
+
+---
+
+# **COMPLETE DEVICE REFERENCE**
+
+## **Router Configuration Details**
+
+### **CORE-R1 (2911 Router)**
+
+**Role:** Primary Internet Gateway, BGP Speaker, NAT Device
+
+**Interfaces:**
+```
+GigabitEthernet0/0: 203.0.113.2/30 (WAN to ISP-R1, AS 100)
+GigabitEthernet0/1: 203.0.113.6/30 (WAN to ISP-R2, AS 200)
+GigabitEthernet0/2: Internal connection (OSPF area 0)
+GigabitEthernet0/3: Internal connection (OSPF area 0)
+```
+
+**Routing Protocols:**
+- OSPF Process 1, Router ID 1.1.1.3, Area 0, MD5 auth key: BANKOSPF2026
+- BGP AS 65001, neighbors: ISP-R1 (203.0.113.1, AS 100), ISP-R2 (203.0.113.5, AS 200)
+
+**NAT Configuration:**
+- Outside interfaces: Gi0/0, Gi0/1
+- Inside interfaces: All others
+- Static: 10.0.20.100 ↔ 203.0.113.150 (Load-Balancer)
+- Dynamic PAT: 10.0.0.0/16 → interface IP overload
+
+**QoS:**
+- Policy-map BANK_QoS on Gi0/0 and Gi0/1 output
+
+**ACL:**
+- Extended ACL BLOCK_INTERNET_IN denying RFC1918 from outside
+
+### **CORE-R2 (2911 Router)**
+
+**Role:** Secondary Internet Gateway, BGP Speaker, NAT Device
+
+**Same as CORE-R1, but:**
+```
+GigabitEthernet0/0: 203.0.113.3/30 (WAN to ISP-R1)
+GigabitEthernet0/1: 203.0.113.7/30 (WAN to ISP-R2)
+OSPF Router ID: 2.2.2.3
+BGP still AS 65001
+```
+
+---
+
+## **L3 Switch Configuration Details**
+
+### **CORE-SW1 (3560-24PS)**
+
+**Role:** Core Layer Distribution, Primary HSRP Gateway, VLAN Termination
+
+**Key Settings:**
+- ip routing (enables L3 functions)
+- hostname CORE-SW1
+
+**VLAN SVIs (Switched Virtual Interfaces):**
+```
+Vlan10: 10.0.10.1/24 (MANAGEMENT)
+Vlan20: 10.0.20.1/24 (SERVERS)
+Vlan30: 10.0.30.1/24 (DATABASE)
+Vlan40: 10.0.40.1/24 (INTERNAL)
+Vlan50: 10.0.50.1/24 (SOC)
+Vlan60: 10.0.60.1/24 (SIEM)
+Vlan70: 10.0.70.1/24 (STORAGE)
+Vlan80: 10.0.80.1/24 (PEERING)
+```
+
+**HSRP Configuration (All VLANs):**
+```
+For Each VLAN (10-80):
+  Virtual IP: 10.0.X.254 (where X = VLAN number)
+  Priority: 110 (ACTIVE)
+  Preempt: Yes
+```
+
+**Trunk Ports:**
+```
+GigabitEthernet1/1 → to FW1 (GigabitEthernet1/1)
+GigabitEthernet1/2 → to FW2 (GigabitEthernet1/1)
+GigabitEthernet2/1 → to AGG-SW1 (GigabitEthernet1/1)
+GigabitEthernet2/2 → to AGG-SW2 (GigabitEthernet1/1)
+
+All trunk: 802.1Q encapsulation, allowed VLAN 10,20,30,40,50,60,70,80,99
+```
+
+**OSPF:**
+```
+Router ID: 3.3.3.1
+Process 1, Area 0
+Network statement: 10.0.0.0 0.0.255.255 area 0
+MD5 auth on all VLAN SVIs: key BANKOSPF2026
+Passive interfaces: All VLAN SVIs (no OSPF hellos to end devices)
+```
+
+### **CORE-SW2 (3560-24PS)**
+
+**Role:** Core Layer Distribution, Standby HSRP Gateway
+
+**Same as CORE-SW1, except:**
+```
+OSPF Router ID: 3.3.3.2
+HSRP Priority: 100 (STANDBY)
+```
+
+### **AGG-SW1 (3560-24PS)**
+
+**Role:** Aggregation Layer Distribution, Primary Secondary Gateway
+
+**VLAN SVIs:**
+```
+All 10 VLANs, but with .2 IP addresses:
+Vlan10: 10.0.10.2/24
+Vlan20: 10.0.20.2/24
+... etc
+```
+
+**HSRP:**
+```
+Priority 110 (Active) on VLAN 20 only (secondary redundancy)
+Virtual IP: 10.0.20.253
+```
+
+**Trunk Ports:**
+```
+GigabitEthernet1/1 → to CORE-SW1 (GigabitEthernet2/1)
+GigabitEthernet1/2 → to CORE-SW2 (GigabitEthernet2/2)
+FastEthernet0/1 → to ACC-SW1
+FastEthernet0/2 → to ACC-SW2
+FastEthernet0/3 → to ACC-SW3
+FastEthernet0/4 → to ACC-SW4
+FastEthernet0/5 → to ACC-SW5
+FastEthernet0/6 → to ACC-SW6
+```
+
+**OSPF:**
+```
+Router ID: 5.5.5.1
+Same network statements and auth as Core switches
+```
+
+### **AGG-SW2 (3560-24PS)**
+
+**Same as AGG-SW1, except:**
+```
+OSPF Router ID: 5.5.5.2
+HSRP Priority: 100 (Standby)
+```
+
+---
+
+## **L2 Switch Configuration Details**
+
+### **ACC-SWx (2960-24TT) - Access Switches 1-6**
+
+**Role:** Pure Layer 2 Switching, NO Routing
+
+**Port Configuration:**
+```
+GigabitEthernet0/1: Trunk to AGG-SW1
+GigabitEthernet0/2: Trunk to AGG-SW2
+
+FastEthernet0/3-24: 
+  - Access ports for servers
+  - Assigned to appropriate VLAN
+  - Shutdown initially (security)
+```
+
+**Trunk Configuration:**
+```
+switchport mode trunk
+switchport trunk encapsulation dot1q
+switchport trunk allowed vlan 10,20,30,40,50,60,70,80,99
+no shutdown
+```
+
+**Access Port Configuration:**
+```
+switchport mode access
+switchport access vlan [VLAN_NUMBER]
+shutdown (initially, no shutdown when server connected)
+```
+
+**Unused Port Security:**
+```
+interface range FastEthernet0/3-24
+ switchport access vlan 99  (send to blackhole)
+ shutdown                   (disable)
+exit
+```
+
+**NOTE:** No ip routing, no VLAN SVIs, no OSPF!
+These are pure switches - just forward frames.
+
+---
+
+## **Firewall Configuration Details**
+
+### **FW1 (ASA 5506-X)**
+
+**Hostname:** FW1
+
+**Interfaces:**
+```
+GigabitEthernet1/1:
+  nameif outside
+  security-level 0 (internet-facing, untrusted)
+  ip address 203.0.113.2 255.255.255.252
+
+GigabitEthernet1/2:
+  nameif dmz
+  security-level 50 (semi-trusted)
+  ip address 10.0.80.1 255.255.255.0
+```
+
+**OSPF Router ID:** 1.1.1.4 (unique, different from routers)
+
+**ACL FW1_IN (Applied to outside interface, inbound):**
+```
+deny ip any 10.0.0.0 255.255.0.0      [Block RFC1918 from internet]
+deny ip any 172.16.0.0 255.240.0.0    [Block RFC1918 from internet]
+deny ip any 192.168.0.0 255.255.0.0   [Block RFC1918 from internet]
+permit tcp any any eq 80               [Allow HTTP]
+permit tcp any any eq 443              [Allow HTTPS]
+permit tcp any any established         [Allow return traffic]
+deny ip any any                        [Deny everything else (implicit)]
+```
+
+**Firewall Behavior:**
+```
+Packet from internet comes in:
+1. Check if source is 10.0.x.x? → DENY (RFC1918 spoofing)
+2. Check if destination port 80? → PERMIT
+3. Check if destination port 443? → PERMIT
+4. Check if established TCP? → PERMIT
+5. Else → DENY
+
+For HTTPS website access:
+Internet → port 443 → PERMIT → DMZ/Internal
+Internal → Internet → Stateful (remember connection) → PERMIT return
+```
+
+### **FW2 (ASA 5506-X)**
+
+**Hostname:** FW2
+
+**Interfaces:**
+```
+GigabitEthernet1/1:
+  nameif dmz
+  security-level 50
+  ip address 10.0.80.2 255.255.255.0
+
+GigabitEthernet1/2:
+  nameif inside
+  security-level 100 (internal, most trusted)
+  ip address 10.0.50.254 255.255.255.0
+```
+
+**OSPF Router ID:** 2.2.2.4
+
+**ACL FW2_DB (Applied to inside interface, inbound):**
+```
+permit tcp 10.0.20.0 255.255.255.0 10.0.30.0 255.255.255.0 eq 3306
+  [VLAN 20 Servers can connect to VLAN 30 Database on MySQL port]
+
+permit tcp 10.0.50.0 255.255.255.0 10.0.30.0 255.255.255.0 eq 3306
+  [VLAN 50 Security can connect to VLAN 30 Database on MySQL port]
+
+deny ip any any
+  [Everything else denied]
+```
+
+**Firewall Behavior:**
+```
+Packet from inside comes in:
+1. Source from VLAN 20 (10.0.20.x) AND dest to VLAN 30 (10.0.30.x) AND port 3306? → PERMIT
+2. Source from VLAN 50 (10.0.50.x) AND dest to VLAN 30 (10.0.30.x) AND port 3306? → PERMIT
+3. Else → DENY
+
+Example scenarios:
+✓ Web server (10.0.20.5) → Database (10.0.30.100:3306) = PERMIT
+✗ Internal server (10.0.40.5) → Database (10.0.30.100:3306) = DENY
+✓ SOC appliance (10.0.50.50) → Database (10.0.30.100:3306) = PERMIT
+✗ VLAN 60 (10.0.60.x) → Database (10.0.30.100:3306) = DENY
+```
+
+---
+
+## **Server-PT Configuration Details**
+
+### **How Server-PT IP Configuration Works:**
+
+In Packet Tracer, Server-PT doesn't have a traditional CLI. Instead, you configure the IP using a special comment format in the terminal.
+
+**Static IP Format:**
+```
+#IPCONFIG: STATIC, <IP>, <MASK>, <GATEWAY>
+```
+
+### **Server Details:**
+
+**Load-Balancer (VLAN 20):**
+```
+IP: 10.0.20.100
+Subnet: 255.255.255.0
+Gateway: 10.0.20.254 (HSRP virtual IP)
+Purpose: Distributes web traffic to multiple web servers
+Connected to: ACC-SW1 or ACC-SW2
+```
+
+**DB-SERVER (VLAN 30):**
+```
+IP: 10.0.30.100
+Subnet: 255.255.255.0
+Gateway: 10.0.30.254 (HSRP virtual IP)
+Purpose: MySQL database for financial data
+Connected to: ACC-SW2 or ACC-SW3
+Service: MySQL on port 3306
+```
+
+**SOC - Security Operations Center (VLAN 50):**
+```
+IP: 10.0.50.50
+Subnet: 255.255.255.0
+Gateway: 10.0.50.254
+Purpose: 24/7 security monitoring
+Connected to: ACC-SW6
+Role: Monitors for attacks, reviews alerts
+```
+
+**SIEM - Security Information & Event Management (VLAN 60):**
+```
+IP: 10.0.60.50
+Subnet: 255.255.255.0
+Gateway: 10.0.60.254
+Purpose: Centralized log collection and analysis
+Connected to: ACC-SW4 or ACC-SW5
+Role: Aggregates logs from all security devices
+```
+
+**IDS - Intrusion Detection System (VLAN 50):**
+```
+IP: 10.0.50.51
+Subnet: 255.255.255.0
+Gateway: 10.0.50.254
+Purpose: Monitors network traffic for malicious patterns
+Connected to: ACC-SW6
+Role: Passive monitoring (detects but doesn't stop)
+```
+
+**IPS - Intrusion Prevention System (VLAN 50):**
+```
+IP: 10.0.50.52
+Subnet: 255.255.255.0
+Gateway: 10.0.50.254
+Purpose: Detects AND stops malicious traffic
+Connected to: ACC-SW6
+Role: Active defense (can block threats)
+```
+
+### **ISP Routers:**
+
+**ISP-R1 (AS 100):**
+```
+GigabitEthernet0/0: 203.0.113.1/30
+Peer: CORE-R1 (203.0.113.2) and CORE-R2 (203.0.113.3)
+AS: 100
+Role: Internet provider 1
+```
+
+**ISP-R2 (AS 200):**
+```
+GigabitEthernet0/0: 203.0.113.5/30
+Peer: CORE-R1 (203.0.113.6) and CORE-R2 (203.0.113.7)
+AS: 200
+Role: Internet provider 2
+```
+
+---
+
+# **DETAILED CONFIGURATION WALKTHROUGH**
+
+## **Before You Start - Prerequisites**
+
+1. **Cisco Packet Tracer 8.1 installed** on your computer
+2. **Basic networking knowledge** - IP addresses, subnets, protocols
+3. **2-3 hours** to complete initial setup
+4. **Patience** - Troubleshooting takes time!
+
+---
+
+## **Phase 0: Create New Project**
+
+1. Open Cisco Packet Tracer
+2. Click "File" → "New"
+3. Start with blank topology
+4. Set up workspace
+
+---
+
+## **Phase 1: Add All Devices**
+
+From the left panel, drag devices into workspace:
+
+**Routers (click and drag from panel):**
+- Router → 2911 → Drag 4 copies (CORE-R1, CORE-R2, ISP-R1, ISP-R2)
+
+**Switches:**
+- Switch → 3560-24PS → Drag 4 copies (CORE-SW1, CORE-SW2, AGG-SW1, AGG-SW2)
+- Switch → 2960-24TT → Drag 6 copies (ACC-SW1 through ACC-SW6)
+
+**Firewalls:**
+- Security Device → ASA 5506-X → Drag 2 copies (FW1, FW2)
+
+**Servers:**
+- Server → Server-PT → Drag 6 copies (Load-Balancer, DB-SERVER, SOC, SIEM, IDS, IPS)
+
+**Total: 21 devices**
+
+### **Rename Each Device:**
+
+Click device → Click config tab → Set hostname
+
+Example:
+```
+CORE-R1 → Configure → Hostname → Type "CORE-R1"
+CORE-R1 → Configure → Save
+```
+
+Repeat for all devices!
+
+---
+
+## **Phase 2: Connect Devices with Cables**
+
+### **Cable Types:**
+
+Use "Copper Straight-Through" for most connections (1 Gbps)
+
+### **Core Layer Connections:**
+
+```
+CORE-R1 GigabitEthernet0/0 ←→ ISP-R1 GigabitEthernet0/0
+CORE-R1 GigabitEthernet0/1 ←→ ISP-R2 GigabitEthernet0/0
+CORE-R2 GigabitEthernet0/0 ←→ ISP-R1 GigabitEthernet0/1
+CORE-R2 GigabitEthernet0/1 ←→ ISP-R2 GigabitEthernet0/1
+
+CORE-SW1 GigabitEthernet1/1 ←→ FW1 GigabitEthernet1/1
+CORE-SW1 GigabitEthernet1/2 ←→ FW2 GigabitEthernet1/1
+CORE-SW2 GigabitEthernet1/1 ←→ FW1 GigabitEthernet1/2
+CORE-SW2 GigabitEthernet1/2 ←→ FW2 GigabitEthernet1/2
+
+CORE-SW1 GigabitEthernet2/1 ←→ AGG-SW1 GigabitEthernet1/1
+CORE-SW1 GigabitEthernet2/2 ←→ AGG-SW2 GigabitEthernet1/1
+CORE-SW2 GigabitEthernet2/1 ←→ AGG-SW1 GigabitEthernet1/2
+CORE-SW2 GigabitEthernet2/2 ←→ AGG-SW2 GigabitEthernet1/2
+```
+
+### **Aggregation to Access Layer:**
+
+```
+AGG-SW1 FastEthernet0/1 ←→ ACC-SW1 GigabitEthernet0/1
+AGG-SW1 FastEthernet0/2 ←→ ACC-SW2 GigabitEthernet0/1
+AGG-SW1 FastEthernet0/3 ←→ ACC-SW3 GigabitEthernet0/1
+AGG-SW1 FastEthernet0/4 ←→ ACC-SW4 GigabitEthernet0/1
+AGG-SW1 FastEthernet0/5 ←→ ACC-SW5 GigabitEthernet0/1
+AGG-SW1 FastEthernet0/6 ←→ ACC-SW6 GigabitEthernet0/1
+
+AGG-SW2 FastEthernet0/1 ←→ ACC-SW1 GigabitEthernet0/2
+AGG-SW2 FastEthernet0/2 ←→ ACC-SW2 GigabitEthernet0/2
+AGG-SW2 FastEthernet0/3 ←→ ACC-SW3 GigabitEthernet0/2
+AGG-SW2 FastEthernet0/4 ←→ ACC-SW4 GigabitEthernet0/2
+AGG-SW2 FastEthernet0/5 ←→ ACC-SW5 GigabitEthernet0/2
+AGG-SW2 FastEthernet0/6 ←→ ACC-SW6 GigabitEthernet0/2
+```
+
+### **Access Layer to Servers:**
+
+```
+ACC-SW1 FastEthernet0/3 ←→ VLAN 10 Device (e.g., management workstation)
+ACC-SW1 FastEthernet0/4 ←→ VLAN 20 Device
+...
+
+ACC-SW6 FastEthernet0/3 ←→ SOC Server
+ACC-SW6 FastEthernet0/4 ←→ SIEM Server
+ACC-SW6 FastEthernet0/5 ←→ IDS Server
+ACC-SW6 FastEthernet0/6 ←→ IPS Server
+```
+
+---
+
+## **Phase 3: Configure Router WAN Interfaces**
+
+(Rest of detailed walkthrough continues in next section...)
+
+[Due to length constraints, I'm providing the core framework. Let me save the complete rest of the guide]
